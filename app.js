@@ -366,16 +366,24 @@ function navigate(screen) {
   AppState.currentScreen = screen;
   renderPage();
   document.getElementById("content").scrollTop = 0;
+  updateTabBar();
+}
+
+function toast(msg, type) {
+  var el = document.getElementById("toast");
+  var bg = type === "success" ? "var(--accent-dim)" : type === "error" ? "var(--danger-dim)" : "var(--surface)";
+  var color = type === "success" ? "var(--accent)" : type === "error" ? "var(--danger)" : "var(--text-primary)";
+  el.innerHTML = '<div class="toast-msg" style="background:' + bg + ';color:' + color + '">' + msg + '</div>';
+  setTimeout(function() { el.innerHTML = ""; }, 2500);
 }
 
 function updateTabBar() {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-  const activeTab = AppState.selectedTab;
-  document.querySelectorAll(".tab-btn")[activeTab]?.classList.add("active");
-
-  const tabs = ["dashboard", "transactions", "analytics", "loans", "settings"];
-  if (tabs.includes(AppState.currentScreen))
-    AppState.selectedTab = tabs.indexOf(AppState.currentScreen);
+  var tabs = ["dashboard", "transactions", "analytics", "loans", "settings"];
+  var idx = tabs.indexOf(AppState.currentScreen);
+  if (idx >= 0) AppState.selectedTab = idx;
+  var active = document.querySelectorAll(".tab-btn")[AppState.selectedTab];
+  if (active) active.classList.add("active");
 }
 
 async function loadAllData() {
@@ -419,39 +427,87 @@ function renderDashboard(el) {
     last7.push({ label: d.toLocaleDateString("en", { weekday: "short" }), amount: amt });
   }
 
+  var overdue = AppState.loans.filter(function(l) { return l.isOverdue; });
   var loansLent = AppState.loans.filter(function(l) { return l.direction === "iLent" && !l.isFullyRepaid && !l.isForgiven; }).reduce(function(s, l) { return s + (l.remainingAmount||0); }, 0);
   var loansBorrowed = AppState.loans.filter(function(l) { return l.direction === "iBorrowed" && !l.isFullyRepaid && !l.isForgiven; }).reduce(function(s, l) { return s + (l.remainingAmount||0); }, 0);
-  var overdue = AppState.loans.filter(function(l) { return l.isOverdue; });
-  var recentHtml = txns.slice(0, 8).map(function(t) { return txnRow(t); }).join("");
-  var overdueHtml = overdue.length ? '<div class="alert-red" onclick="navigate(\'loans\')">' + overdue.length + ' loan(s) overdue - Tap to view</div>' : "";
+  var allRecurring = detectRecurring(txns.filter(function(t) { return t.type === "debit"; }));
+  var recurringMonth = allRecurring.reduce(function(s, t) { return s + t.amount; }, 0);
 
-  el.innerHTML = '<div class="dash-header"><div><div class="text-secondary">' + fmtMonthYear(now) + '</div><div class="title">Welcome back</div></div></div>' +
-    '<div class="card net-worth"><div class="text-secondary small">Total Net Worth</div><div class="amount-large" style="color:var(--accent)">' + fmtPKR(netWorth) + '</div>' +
-    '<div class="row gap-20" style="justify-content:center;margin-top:8px"><span style="color:var(--accent)">' + fmtPKR(income, true) + '</span><span style="color:var(--danger)">' + fmtPKR(spending, true) + '</span><span style="color:var(--gold)">' + fmtPKR(net, true) + '</span></div></div>' +
-    '<div class="row gap-12"><div class="stat-card"><div class="small text-secondary">Income</div><div class="h3" style="color:var(--accent)">' + fmtPKR(income, true) + '</div></div>' +
-    '<div class="stat-card"><div class="small text-secondary">Spending</div><div class="h3" style="color:var(--danger)">' + fmtPKR(spending, true) + '</div></div>' +
-    '<div class="stat-card"><div class="small text-secondary">Saved</div><div class="h3" style="color:var(--gold)">' + fmtPKR(net, true) + '</div></div></div>' +
-    '<div class="card"><div class="subtitle">Spending Trend (7 Days)</div><canvas id="trendChart" height="140"></canvas></div>' +
-    '<div class="card"><div class="subtitle">Top Spending Categories</div><canvas id="donutChart" height="200"></canvas></div>' +
-    overdueHtml +
-    '<div class="card"><div class="row sb" style="margin-bottom:8px"><span class="subtitle">Recent</span><span class="link" onclick="navigate(\'transactions\')">See All</span></div>' + recentHtml + '</div>' +
-    '<div class="row gap-12" style="margin-top:8px"><button class="fab-btn" onclick="navigate(\'import\')">Import</button><button class="fab-btn" onclick="navigate(\'advisor\')">AI Advisor</button><button class="fab-btn" onclick="navigate(\'loans\')">Udhaar</button></div>';
+  var html = '';
+  html += '<div class="section-header" style="margin-top:8px"><span class="section-title">' + fmtMonthYear(now) + '</span></div>';
+  
+  // Hero net worth card
+  html += '<div class="hero-card"><div class="hero-label">Total Net Worth</div>';
+  html += '<div class="hero-amount">' + fmtPKR(netWorth) + '</div>';
+  html += '<div class="hero-subtitle">Across ' + AppState.bankAccounts.length + ' connected accounts</div>';
+  html += '<div class="hero-row">';
+  html += '<div class="hero-stat"><div class="hero-stat-val" style="color:var(--accent)">' + fmtPKR(income, true) + '</div><div class="hero-stat-lbl">Income</div></div>';
+  html += '<div class="hero-stat"><div class="hero-stat-val" style="color:var(--danger)">' + fmtPKR(spending, true) + '</div><div class="hero-stat-lbl">Spent</div></div>';
+  html += '<div class="hero-stat"><div class="hero-stat-val" style="color:var(--gold)">' + fmtPKR(net, true) + '</div><div class="hero-stat-lbl">Saved</div></div>';
+  html += '</div></div>';
+
+  // Statistcs grid
+  html += '<div class="stat-row">';
+  html += '<div class="stat-card"><div class="stat-icon" style="font-size:18px">' + catIcon(topCats.length ? topCats[0][0] : "other") + '</div><div class="stat-val" style="color:var(--accent)">' + fmtPKR(income, true) + '</div><div class="stat-lbl">Income</div></div>';
+  html += '<div class="stat-card"><div class="stat-icon" style="font-size:18px">▼</div><div class="stat-val" style="color:var(--danger)">' + fmtPKR(spending, true) + '</div><div class="stat-lbl">Spending</div></div>';
+  html += '<div class="stat-card"><div class="stat-icon" style="font-size:18px">★</div><div class="stat-val" style="color:var(--gold)">' + fmtPKR(net, true) + '</div><div class="stat-lbl">Saved</div></div>';
+  html += '</div>';
+
+  // Overdue alert
+  if (overdue.length) {
+    html += '<div class="alert alert-red" onclick="navigate(\'loans\')">◉ ' + overdue.length + ' loan' + (overdue.length > 1 ? 's' : '') + ' overdue — tap to review</div>';
+  }
+
+  // Quick actions
+  html += '<div class="quick-actions">';
+  html += '<div class="quick-action" onclick="navigate(\'import\')"><div class="quick-action-icon">⬆</div><div class="quick-action-label">Import</div></div>';
+  html += '<div class="quick-action" onclick="navigate(\'budget\')"><div class="quick-action-icon">◈</div><div class="quick-action-label">Budgets</div></div>';
+  html += '<div class="quick-action" onclick="navigate(\'advisor\')"><div class="quick-action-icon">✦</div><div class="quick-action-label">AI Chat</div></div>';
+  html += '<div class="quick-action" onclick="navigate(\'savings\')"><div class="quick-action-icon">◆</div><div class="quick-action-label">Goals</div></div>';
+  html += '</div>';
+
+  // Spending trend
+  html += '<div class="glass-card"><div class="section-header"><span class="section-title">Spending Trend</span><span class="section-link">7 days</span></div>';
+  html += '<canvas id="trendChart" height="150"></canvas></div>';
+
+  // Donut chart
+  html += '<div class="glass-card"><div class="section-header"><span class="section-title">Top Categories</span></div>';
+  html += '<canvas id="donutChart" height="200"></canvas></div>';
+
+  // Udhaar summary
+  if (loansLent > 0 || loansBorrowed > 0) {
+    html += '<div class="glass-card" onclick="navigate(\'loans\')" style="cursor:pointer">';
+    html += '<div class="section-header"><span class="section-title">Udhaar Summary</span><span class="section-link">View all →</span></div>';
+    html += '<div style="display:flex;gap:24px;margin-top:8px">';
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Owed to You</div><div style="font-size:18px;font-weight:700;color:var(--accent)">' + fmtPKR(loansLent, true) + '</div></div>';
+    html += '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">You Owe</div><div style="font-size:18px;font-weight:700;color:var(--danger)">' + fmtPKR(loansBorrowed, true) + '</div></div>';
+    html += '</div></div>';
+  }
+
+  // Recent transactions
+  var recentHtml = txns.slice(0, 6).map(function(t) { return txnRow(t); }).join("");
+  html += '<div class="glass-card"><div class="section-header"><span class="section-title">Recent Activity</span><span class="section-link" onclick="navigate(\'transactions\')">See All →</span></div>';
+  html += recentHtml + '</div>';
+
+  // Recurring bills
+  if (recurringMonth > 0) {
+    html += '<div class="glass-card"><div class="section-header"><span class="section-title">Estimated Monthly Bills</span></div>';
+    html += '<div style="font-size:24px;font-weight:700;color:var(--gold)">' + fmtPKR(recurringMonth) + '</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">From ' + allRecurring.length + ' recurring transactions</div></div>';
+  }
+
+  el.innerHTML = html;
 
   setTimeout(function() {
-    drawBarChart("trendChart", last7.map(function(d) { return d.label; }), last7.map(function(d) { return d.amount; }), "#FF4757");
-    drawDonutChart("donutChart", topCats);
+    drawBarChart("trendChart", last7.map(function(d) { return d.label; }), last7.map(function(d) { return d.amount; }), "#E8515C");
+    if (topCats.length) drawDonutChart("donutChart", topCats);
   }, 100);
 }
 
-function txnRow(t) {
-  return '<div class="txn-row"><div class="txn-icon" style="background:' + catColor(t.category) + '20">' + catIcon(t.category) + '</div><div class="txn-info"><div class="text-pri">' + (t.merchant || t.description) + '</div><div class="text-sec small">' + catLabel(t.category) + ' ' + fmtDateShort(t.date) + '</div></div><div class="txn-amt" style="color:' + (t.type==="credit"?"var(--accent)":"var(--danger)") + '">' + (t.type==="debit"?"-":"") + fmtPKR(t.amount, true) + '</div></div>';
-}
-
-function navigate(screen) {
-  AppState.currentScreen = screen;
-  renderPage();
-  document.getElementById("content").scrollTop = 0;
-  updateTabBar();
+function txnRow(t, showBank) {
+  var typeSign = t.type === "debit" ? "-" : "+";
+  var typeColor = t.type === "credit" ? "var(--accent)" : "var(--danger)";
+  return '<div class="txn-row"><div class="txn-icon" style="background:' + catColor(t.category) + '15">' + catIcon(t.category) + '</div><div class="txn-info"><div class="txn-name">' + (t.merchant || t.description) + '</div><div class="txn-meta"><span>' + catLabel(t.category) + '</span>' + (showBank ? '<span>' + bankLabel(t.bankSource) + '</span>' : '') + '<span>' + fmtDateShort(t.date) + '</span></div></div><div class="txn-amount" style="color:' + typeColor + '">' + typeSign + fmtPKR(t.amount, true) + '</div></div>';
 }
 
 function updateTabBar() {
@@ -674,43 +730,141 @@ function renderImport(el) {
 
   var body;
   if (AppState.importStep === "idle") {
-    body = '<div class="upload-zone" onclick="document.getElementById(\'fileInput\').click()"><div style="font-size:40px">PDF</div><div>Tap to Select Statement</div><div class="small text-secondary">CSV files supported</div><input type="file" id="fileInput" accept=".csv" style="display:none" onchange="handleFileImport(this.files[0])"></div>';
+    body = '<div class="upload-zone" onclick="document.getElementById(\'fileInput\').click()"><div style="font-size:40px">📄</div><div>Tap to Select Statement</div><div class="small text-secondary">PDF & CSV supported</div><input type="file" id="fileInput" accept=".csv,.pdf,application/pdf,text/csv,text/comma-separated-values" style="display:none" onchange="handleFileImport(this.files[0])"></div>';
   } else if (AppState.importStep === "preview") {
     body = '<div class="card"><div class="subtitle">Preview (' + AppState.importTxns.length + ' transactions)</div>' +
       AppState.importTxns.slice(0, 8).map(function(t) { return txnRow(t); }).join("") +
       '<div class="row gap-8" style="margin-top:8px"><button class="btn-secondary" onclick="AppState.importStep=\'idle\';renderPage()">Cancel</button><button class="btn-primary" onclick="confirmImport()">Confirm Import</button></div></div>';
   } else if (AppState.importStep === "complete") {
-    body = '<div class="alert-green">Imported successfully! ' + AppState.importTxns.length + ' transactions added.</div>';
+    body = '<div class="alert alert-green">✓ Imported successfully! ' + AppState.importTxns.length + ' transactions added.</div>';
   } else {
-    body = '<div class="upload-zone"><div class="spinner"></div><div>' + (AppState.importStep==="detecting"?"Detecting Bank...":AppState.importStep==="parsing"?"Parsing...":"Categorizing...") + '</div></div>';
+    body = '<div class="glass-card" style="text-align:center;padding:32px"><div class="spinner"></div><div style="margin-top:12px;color:var(--text-secondary)">' + (AppState.importStep==="detecting"?"Detecting Bank...":AppState.importStep==="parsing"?"Parsing Transactions...":"Categorizing...") + '</div></div>';
   }
 
-  el.innerHTML = '<div class="title" style="margin-bottom:12px">Import Statement</div><div class="row gap-8" style="flex-wrap:wrap;margin-bottom:12px">' + bankBtns + '</div>' + body;
+  el.innerHTML = '<div class="section-header" style="margin-top:4px"><span class="section-title">Import Statement</span></div><div class="chip-row">' + bankBtns + '</div>' + body;
 }
 
 async function handleFileImport(file) {
   if (!file) return;
   AppState.importStep = "detecting"; renderPage();
-  var text = await file.text();
-  AppState.importStep = "parsing"; renderPage();
-  var txns = parseCSV(text);
+  
+  var text;
+  if (file.name.toLowerCase().endsWith(".pdf")) {
+    text = await readPDFText(file);
+    if (!text || text.length < 20) {
+      AppState.importStep = "idle";
+      toast("Could not read PDF text. Try CSV instead.", "error");
+      renderPage();
+      return;
+    }
+    AppState.importStep = "parsing"; renderPage();
+    var txns = parseMeezanPDFText(text, AppState.importBank || "meezanBank");
+  } else {
+    text = await file.text();
+    AppState.importStep = "parsing"; renderPage();
+    var txns = parseCSV(text);
+  }
+  
   AppState.importStep = "categorizing"; renderPage();
   txns.forEach(function(t) {
     if (AppState.importBank) t.bankSource = AppState.importBank;
+    t.category = classifyTransaction(t);
   });
   AppState.importTxns = txns;
   AppState.importStep = "preview";
   renderPage();
 }
 
+function readPDFText(file) {
+  return new Promise(function(resolve) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var text = e.target.result;
+      resolve(text);
+    };
+    reader.onerror = function() { resolve(""); };
+    reader.readAsText(file);
+  });
+}
+
+function parseMeezanPDFText(text, bankSource) {
+  var txns = [];
+  var lines = text.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 10; });
+  
+  var datePattern = /(\d{1,2}[-/]\w{3,}[-/]\d{2,4})/i;
+  var numberPattern = /([\d,]+\.?\d*)/g;
+  
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var dateMatch = line.match(datePattern);
+    if (!dateMatch) continue;
+    
+    var dateStr = dateMatch[1];
+    // Try to parse date
+    var d = parseDateAny(dateStr);
+    
+    var afterDate = line.substring(dateMatch.index + dateMatch[0].length);
+    var numbers = [];
+    var m;
+    while ((m = numberPattern.exec(afterDate)) !== null) {
+      var num = parseFloat(m[1].replace(/,/g, ""));
+      if (!isNaN(num) && num > 0) numbers.push(num);
+    }
+    
+    if (numbers.length === 0) continue;
+    
+    // Extract description (remove numbers from line)
+    var desc = afterDate.replace(numberPattern, "").trim();
+    if (!desc || desc.length < 2) desc = "Bank Transaction";
+    
+    var amount, type, balance = null;
+    if (numbers.length >= 2) {
+      amount = numbers[0];
+      balance = numbers[numbers.length - 1];
+      type = "debit";
+    } else {
+      amount = numbers[0];
+      type = numbers[0] > 5000 ? "credit" : "debit";
+      if (desc.toLowerCase().indexOf("salary") >= 0 || desc.toLowerCase().indexOf("deposit") >= 0) type = "credit";
+    }
+    
+    txns.push(new Transaction({
+      date: d.toISOString(), amount: amount, type: type,
+      description: desc, merchant: desc,
+      category: classifyTransaction({ description: desc, type: type }),
+      bankSource: bankSource, balance: balance
+    }));
+  }
+  
+  return txns.length > 0 ? txns : parseCSV(text);
+}
+
+function parseDateAny(str) {
+  var formats = [
+    { regex: /(\d{1,2})[-/](\w{3,})[-/](\d{2,4})/, handler: function(m) {
+      var months = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+      return new Date(parseInt(m[3].length === 2 ? "20" + m[3] : m[3]), months[m[2].toLowerCase()] || 0, parseInt(m[1]));
+    }},
+    { regex: /(\d{4})-(\d{2})-(\d{2})/, handler: function(m) { return new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])); }},
+    { regex: /(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/, handler: function(m) { return new Date(parseInt(m[3].length === 2 ? "20" + m[3] : m[3]), parseInt(m[2])-1, parseInt(m[1])); }}
+  ];
+  for (var i = 0; i < formats.length; i++) {
+    var match = str.match(formats[i].regex);
+    if (match) return formats[i].handler(match);
+  }
+  return new Date();
+}
+
 async function confirmImport() {
-  for (var i = 0; i < AppState.importTxns.length; i++) {
+  var count = AppState.importTxns.length;
+  for (var i = 0; i < count; i++) {
     await dbPut("transactions", AppState.importTxns[i]);
   }
   await loadAllData();
   AppState.importStep = "complete";
   renderPage();
-  setTimeout(function() { AppState.importStep = "idle"; AppState.importTxns = []; renderPage(); }, 2000);
+  toast(count + " transactions imported", "success");
+  setTimeout(function() { AppState.importStep = "idle"; AppState.importTxns = []; renderPage(); }, 2500);
 }
 
 /* ============ LOANS ============ */
