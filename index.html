@@ -415,7 +415,7 @@ body {
 </head>
 <body>
 <div id="app">
-  <div id="content"><div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8892A4">Loading...</div></div>
+  <div id="content"><div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8892A4" id="loading">Starting...</div></div>
   <div id="modal"></div>
   <nav class="tab-bar">
     <button class="tab-btn active" onclick="AppState.currentScreen='dashboard';renderPage()">
@@ -435,6 +435,7 @@ body {
     </button>
   </nav>
 </div>
-<script src="app.js"></script>
+<script>document.getElementById("loading").textContent="JS loaded. Starting app...";</script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
