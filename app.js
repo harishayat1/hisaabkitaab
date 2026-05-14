@@ -79,7 +79,14 @@ function dbGet(store, id) {
 }
 
 /* -------- Helpers -------- */
-function uid() { return crypto.randomUUID(); }
+function fallbackUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function uid() { try { return crypto.randomUUID(); } catch(e) { return fallbackUID(); } }
 function fmtPKR(n, compact) {
   if (compact && Math.abs(n) >= 1000000) return "PKR " + (n/1000000).toFixed(1) + "M";
   if (compact && Math.abs(n) >= 1000) return "PKR " + (n/1000).toFixed(1) + "K";
@@ -1055,27 +1062,39 @@ async function seedDemoData() {
 
 /* ============ INIT ============ */
 async function initApp() {
-  await openDB();
-  var settings = await dbGet("settings", "onboarding");
-  if (!settings) {
-    AppState.currentScreen = "onboarding";
-    renderPage();
+  var el = document.getElementById("content");
+  el.innerHTML = '<div style="padding:60px 20px;text-align:center"><div class="spinner" style="margin:0 auto 16px"></div><div class="text-secondary">Setting up your vault...</div></div>';
+
+  var dbTimeout = new Promise(function(_, reject) {
+    setTimeout(function() { reject(new Error("Database timeout")); }, 10000);
+  });
+
+  try {
+    await Promise.race([openDB(), dbTimeout]);
+  } catch(e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center"><h2 style="color:var(--danger)">Database Error</h2><p class="text-secondary">' + e.message + '</p><button class="btn-primary" style="margin-top:16px" onclick="location.reload()">Retry</button></div>';
     return;
   }
-  AppState.onboardingCompleted = true;
-  await loadAllData();
-  AppState.currentScreen = "dashboard";
-  renderPage();
+
+  try {
+    var settings = await dbGet("settings", "onboarding");
+    if (!settings) {
+      AppState.currentScreen = "onboarding";
+      renderPage();
+      return;
+    }
+    AppState.onboardingCompleted = true;
+    await loadAllData();
+    AppState.currentScreen = "dashboard";
+    renderPage();
+  } catch(e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center"><h2 style="color:var(--danger)">Startup Error</h2><p class="text-secondary">' + e.message + '</p><button class="btn-primary" style="margin-top:16px" onclick="location.reload()">Retry</button></div>';
+  }
 }
 
 document.addEventListener("DOMContentLoaded", function() {
-  try {
-    initApp().catch(function(err) {
-      document.getElementById("content").innerHTML = '<div style="padding:40px;text-align:center;color:#FF4757"><h2>Error</h2><p>' + err.message + '</p><p class="text-secondary">Try refreshing the page</p></div>';
-      console.error(err);
-    });
-  } catch(e) {
-    document.getElementById("content").innerHTML = '<div style="padding:40px;text-align:center;color:#FF4757"><h2>Startup Error</h2><p>' + e.message + '</p></div>';
+  try { initApp(); } catch(e) {
+    document.getElementById("content").innerHTML = '<div style="padding:40px;text-align:center"><h2 style="color:var(--danger)">Critical Error</h2><p class="text-secondary">' + e.message + '</p></div>';
   }
 });
 
