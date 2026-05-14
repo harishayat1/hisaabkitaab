@@ -1,4 +1,4 @@
-﻿const CACHE = "hisaabkitaab-v1";
+﻿const CACHE = "hisaabkitaab-v2";
 const ASSETS = [
   "/",
   "/index.html",
