@@ -551,7 +551,7 @@ function renderAnalytics(el) {
 
   el.innerHTML = '<div class="chip-row" style="margin-bottom:12px">' +
     ["thisWeek","thisMonth","last3Months","last6Months"].map(function(per) {
-      return '<div class="chip ' + (p===per?"active":"") + '" onclick="AppState.selectedAnalyticsPeriod=\'' + per + '\';renderPage()">' + (per==="thisWeek"?"Week":"Month":per==="last3Months"?"3M":"6M") + '</div>';
+      return '<div class="chip ' + (p===per?"active":"") + '" onclick="AppState.selectedAnalyticsPeriod=\'' + per + '\';renderPage()">' + (per==="thisWeek"?"Week":per==="thisMonth"?"Month":per==="last3Months"?"3M":"6M") + '</div>';
     }).join("") + '</div>' +
     '<div class="tabs"><div class="tab ' + (tab===0?"active":"") + '" onclick="AppState.selectedAnalyticsTab=0;renderPage()">Categories</div>' +
     '<div class="tab ' + (tab===1?"active":"") + '" onclick="AppState.selectedAnalyticsTab=1;renderPage()">Trends</div>' +
