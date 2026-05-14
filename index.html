@@ -415,27 +415,26 @@ body {
 </head>
 <body>
 <div id="app">
-  <div id="content"></div>
+  <div id="content"><div style="display:flex;align-items:center;justify-content:center;height:100%;color:#8892A4">Loading...</div></div>
   <div id="modal"></div>
   <nav class="tab-bar">
     <button class="tab-btn active" onclick="AppState.currentScreen='dashboard';renderPage()">
-      <span class="tab-icon">Home</span><span>Home</span>
+      <span class="tab-icon">🏠</span><span>Home</span>
     </button>
     <button class="tab-btn" onclick="AppState.currentScreen='transactions';renderPage()">
-      <span class="tab-icon">List</span><span>Txns</span>
+      <span class="tab-icon">💳</span><span>Txns</span>
     </button>
     <button class="tab-btn" onclick="AppState.currentScreen='analytics';renderPage()">
-      <span class="tab-icon">Chart</span><span>Analytics</span>
+      <span class="tab-icon">📊</span><span>Analytics</span>
     </button>
     <button class="tab-btn" onclick="AppState.currentScreen='loans';renderPage()">
-      <span class="tab-icon">Arrow</span><span>Udhaar</span>
+      <span class="tab-icon">🤝</span><span>Udhaar</span>
     </button>
     <button class="tab-btn" onclick="AppState.currentScreen='settings';renderPage()">
-      <span class="tab-icon">Gear</span><span>Settings</span>
+      <span class="tab-icon">⚙️</span><span>Settings</span>
     </button>
   </nav>
 </div>
 <script src="app.js"></script>
-<script src="sw-register.js"></script>
 </body>
 </html>

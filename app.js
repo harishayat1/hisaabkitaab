@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    HisaabKitaab PWA - app.js
    Complete financial management app
    ============================================ */
@@ -1068,8 +1068,17 @@ async function initApp() {
   renderPage();
 }
 
-document.addEventListener("DOMContentLoaded", initApp);
+document.addEventListener("DOMContentLoaded", function() {
+  try {
+    initApp().catch(function(err) {
+      document.getElementById("content").innerHTML = '<div style="padding:40px;text-align:center;color:#FF4757"><h2>Error</h2><p>' + err.message + '</p><p class="text-secondary">Try refreshing the page</p></div>';
+      console.error(err);
+    });
+  } catch(e) {
+    document.getElementById("content").innerHTML = '<div style="padding:40px;text-align:center;color:#FF4757"><h2>Startup Error</h2><p>' + e.message + '</p></div>';
+  }
+});
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/sw.js");
+  navigator.serviceWorker.register("/sw.js").catch(function(){});
 }
