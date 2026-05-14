@@ -1,0 +1,11 @@
+﻿{
+  "name": "HisaabKitaab",
+  "short_name": "HisaabKitaab",
+  "description": "Personal AI Financial Manager for Pakistan",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0E1A",
+  "theme_color": "#00D09E",
+  "orientation": "portrait-primary",
+  "lang": "en-PK"
+}
