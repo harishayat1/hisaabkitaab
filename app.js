@@ -293,35 +293,106 @@ function generateTip() {
 
 /* -------- CSV Parser -------- */
 function parseCSV(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+  var lines = text.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(function(l) { return l && l.length > 5; });
   if (lines.length < 2) return [];
-  const header = lines[0].toLowerCase();
-  const cols = header.split(",").map(c => c.trim());
-  const dateIdx = cols.findIndex(c => c.includes("date")) || 0;
-  const descIdx = cols.findIndex(c => c.includes("desc") || c.includes("narr")) || 1;
-  const amtIdx = cols.findIndex(c => c.includes("amount") || c.includes("amt")) || 2;
-  const balIdx = cols.findIndex(c => c.includes("balance")) || 4;
-  const typeIdx = cols.findIndex(c => c.includes("type")) || -1;
+  var header = lines[0].toLowerCase();
+  var cols = header.split(",").map(function(c) { return c.trim().replace(/"/g, ""); });
 
-  const txns = [];
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(",").map(p => p.trim());
-    if (parts.length < 3) continue;
-    const rawAmt = parseFloat(parts[amtIdx]?.replace(/,/g, ""));
+  // Try to find column indices flexibly
+  var dateIdx = -1, descIdx = -1, amtIdx = -1, balIdx = -1, typeIdx = -1;
+  for (var c = 0; c < cols.length; c++) {
+    var col = cols[c];
+    if (dateIdx === -1 && (col.indexOf("date") >= 0 || col.indexOf("time") >= 0 || col.indexOf("day") >= 0)) dateIdx = c;
+    if (descIdx === -1 && (col.indexOf("desc") >= 0 || col.indexOf("narr") >= 0 || col.indexOf("memo") >= 0 || col.indexOf("detail") >= 0 || col.indexOf("remarks") >= 0 || col.indexOf("particular") >= 0)) descIdx = c;
+    if (amtIdx === -1 && (col.indexOf("amount") >= 0 || col.indexOf("amt") >= 0 || col.indexOf("value") >= 0 || col.indexOf("sum") >= 0)) amtIdx = c;
+    if (balIdx === -1 && (col.indexOf("balance") >= 0 || col.indexOf("bal") >= 0)) balIdx = c;
+    if (typeIdx === -1 && (col.indexOf("type") >= 0 || col.indexOf("dr") >= 0 || col.indexOf("debit") >= 0 || col.indexOf("credit") >= 0)) typeIdx = c;
+  }
+
+  // Fallback: if can't identify columns, use heuristics
+  if (dateIdx === -1) dateIdx = 0;
+  if (descIdx === -1) descIdx = 1;
+  if (amtIdx === -1) {
+    // Find first numeric column that's not likely balance
+    for (var ci = 2; ci < Math.min(cols.length, 10); ci++) {
+      var sample = parseFloat(lines[1].split(",")[ci]?.replace(/,/g, "").replace(/"/g, ""));
+      if (!isNaN(sample)) { amtIdx = ci; break; }
+    }
+    if (amtIdx === -1) amtIdx = 2;
+  }
+
+  var txns = [];
+  for (var i = 1; i < lines.length; i++) {
+    var rawLine = lines[i];
+    // Handle quoted CSV fields
+    var parts = parseCSVLine(rawLine);
+    if (parts.length < Math.max(dateIdx + 1, descIdx + 1, amtIdx + 1)) continue;
+
+    var rawAmt = parseAmount(parts[amtIdx]);
     if (isNaN(rawAmt)) continue;
-    const txn = new Transaction({
-      date: new Date(parts[dateIdx] || Date.now()).toISOString(),
-      description: parts[descIdx] || "",
-      merchant: parts[descIdx] || "",
-      amount: Math.abs(rawAmt),
-      type: typeIdx >= 0 ? (parts[typeIdx]?.toLowerCase() === "credit" ? "credit" : "debit") : (rawAmt < 0 ? "debit" : "credit"),
-      balance: parseFloat(parts[balIdx]?.replace(/,/g, "")) || null,
-      bankSource: "sadapay"
+
+    var dateStr = (parts[dateIdx] || "").replace(/"/g, "").trim();
+    var desc = (parts[descIdx] || parts[1] || "").replace(/"/g, "").trim();
+    if (!desc) desc = "Bank Transaction";
+
+    var type;
+    if (typeIdx >= 0 && parts[typeIdx]) {
+      var tLower = parts[typeIdx].toLowerCase().replace(/"/g, "");
+      type = (tLower === "credit" || tLower === "cr" || tLower === "c") ? "credit" : "debit";
+    } else {
+      type = rawAmt < 0 ? "debit" : "credit";
+    }
+
+    var balance = null;
+    if (balIdx >= 0 && parts[balIdx]) {
+      balance = parseAmount(parts[balIdx]);
+      if (isNaN(balance)) balance = null;
+    }
+
+    var txn = new Transaction({
+      date: parseDateAny(dateStr).toISOString(),
+      description: desc, merchant: desc,
+      amount: Math.abs(rawAmt), type: type,
+      category: classifyTransaction({ description: desc, type: type }),
+      bankSource: "sadapay", balance: balance
     });
-    txn.category = classifyTransaction(txn);
     txns.push(txn);
   }
+
   return txns;
+}
+
+// Parse CSV line with quoted field handling
+function parseCSVLine(line) {
+  var result = [];
+  var current = "";
+  var inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function parseAmount(str) {
+  if (!str) return NaN;
+  var cleaned = str.replace(/"/g, "").replace(/,/g, "").replace(/\s/g, "").trim();
+  // Handle parenthesized negative numbers like (1,250.00)
+  if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+    cleaned = "-" + cleaned.slice(1, -1);
+  }
+  // Handle PKR prefix/suffix
+  cleaned = cleaned.replace(/pkr|rs\.?|₹/gi, "").trim();
+  var num = parseFloat(cleaned);
+  return num;
 }
 
 /* -------- App State -------- */
@@ -748,21 +819,36 @@ async function handleFileImport(file) {
   if (!file) return;
   AppState.importStep = "detecting"; renderPage();
   
-  var text;
+  var text, txns;
   if (file.name.toLowerCase().endsWith(".pdf")) {
     text = await readPDFText(file);
     if (!text || text.length < 20) {
       AppState.importStep = "idle";
-      toast("Could not read PDF text. Try CSV instead.", "error");
+      toast("Could not read PDF. Try a CSV export instead.", "error");
       renderPage();
       return;
     }
     AppState.importStep = "parsing"; renderPage();
-    var txns = parseMeezanPDFText(text, AppState.importBank || "meezanBank");
+    txns = parseMeezanPDFText(text, AppState.importBank || "meezanBank");
+    // If PDF parsing found nothing, try CSV-style parsing as fallback
+    if (txns.length === 0) {
+      txns = parseCSV(text);
+    }
   } else {
     text = await file.text();
     AppState.importStep = "parsing"; renderPage();
-    var txns = parseCSV(text);
+    txns = parseCSV(text);
+    // If CSV header-based parsing found nothing, try Meezan-style parsing
+    if (txns.length === 0) {
+      txns = parseMeezanPDFText(text, AppState.importBank || "easypaisa");
+    }
+  }
+
+  if (txns.length === 0) {
+    AppState.importStep = "idle";
+    toast("No transactions found. Check file format.", "error");
+    renderPage();
+    return;
   }
   
   AppState.importStep = "categorizing"; renderPage();
@@ -779,11 +865,39 @@ function readPDFText(file) {
   return new Promise(function(resolve) {
     var reader = new FileReader();
     reader.onload = function(e) {
-      var text = e.target.result;
-      resolve(text);
+      var bytes = new Uint8Array(e.target.result);
+      var text = "";
+      // Try to extract text from PDF binary
+      for (var i = 0; i < bytes.length; i++) {
+        // Only keep printable ASCII and common chars
+        var b = bytes[i];
+        if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
+          text += String.fromCharCode(b);
+        } else if (b === 10 || b === 13) {
+          text += "\n";
+        }
+      }
+      // Clean up the extracted text
+      text = text.replace(/[^\x20-\x7E\n\r\t]/g, "");
+      text = text.replace(/\n{3,}/g, "\n\n");
+      text = text.replace(/ {2,}/g, " ");
+
+      // Try to find transaction-like lines (lines with dates and numbers)
+      var lines = text.split(/\r?\n/).filter(function(l) { return l.trim().length > 10; });
+      var txnLines = lines.filter(function(l) {
+        return /\d{1,2}[-/]\w{3,}[-/]\d{2,4}/.test(l) || /\d{4}-\d{2}-\d{2}/.test(l) || /\d{1,2}[-/]\d{1,2}[-/]\d{2,4}/.test(l);
+      });
+
+      // If we found date-containing lines, extract just those for cleaner parsing
+      if (txnLines.length > 0) {
+        resolve(txnLines.join("\n"));
+      } else {
+        // Fall back to full text
+        resolve(text);
+      }
     };
     reader.onerror = function() { resolve(""); };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   });
 }
 
